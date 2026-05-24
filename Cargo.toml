@@ -1,0 +1,23 @@
+[package]
+name = "pqvault"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+argon2 = "0.5"
+base64 = "0.22"
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+crossterm = "0.27"
+dirs = "6"
+hkdf = "0.12"
+ml-dsa = { version = "0.1", features = ["getrandom"] }
+ml-kem = { version = "0.3", features = ["getrandom"] }
+rand = "0.8"
+ratatui = "0.29"
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+zeroize = { version = "1", features = ["zeroize_derive"] }
+libc = "0.2"
