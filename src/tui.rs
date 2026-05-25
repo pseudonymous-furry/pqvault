@@ -28,10 +28,11 @@ enum Focus {
     Title,
     Username,
     Password,
+    GenPassword,
+    ShowPassword,
     Notes,
     Save,
     Cancel,
-    TogglePassword,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -97,8 +98,9 @@ fn next_focus(f: Focus) -> Focus {
     match f {
         Title => Username,
         Username => Password,
-        Password => TogglePassword,
-        TogglePassword => Notes,
+        Password => ShowPassword,
+        ShowPassword => GenPassword,
+        GenPassword => Notes,
         Notes => Save,
         Save => Cancel,
         Cancel => Title,
@@ -111,8 +113,9 @@ fn prev_focus(f: Focus) -> Focus {
         Title => Cancel,
         Username => Title,
         Password => Username,
-        TogglePassword => Password,
-        Notes => TogglePassword,
+        ShowPassword => Password,
+        GenPassword => ShowPassword,
+        Notes => GenPassword,
         Save => Notes,
         Cancel => Save,
     }
@@ -264,7 +267,7 @@ pub fn tui_run_vault(
 
                         KeyCode::Char('g') => {
                             let mut draft = Entry::empty();
-                            draft.password = printable_password(24);
+                            draft.password = printable_password(32);
                             mode = UiMode::Editing(EditorState {
                                 target: EditorTarget::New,
                                 draft,
@@ -350,8 +353,11 @@ fn handle_editor(state: &mut EditorState, key: KeyCode) -> Option<bool> {
             Focus::Notes => state.draft.notes.push('\n'),
             Focus::Save => return Some(true),
             Focus::Cancel => return Some(false),
-            Focus::TogglePassword => {
+            Focus::ShowPassword => {
                 state.show_pass = !state.show_pass;
+            }
+            Focus::GenPassword => {
+                state.draft.password = printable_password(32);
             }
         },
 
@@ -459,7 +465,7 @@ fn draw_browse(f: &mut Frame<'_>, user: &UserRecord, vault: &Vault, selected: us
 
     f.render_widget(info, body[1]);
 
-    let help = Paragraph::new("↑↓ move | Enter view | e edit | a add | g generated | D delete | q quit")
+    let help = Paragraph::new("↑↓ move | Enter view | e edit | a add | g generate | D delete | q quit")
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(help, outer[2]);
@@ -500,7 +506,7 @@ fn draw_editor(f: &mut Frame<'_>, state: &EditorState) {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
-            Constraint::Length(1),
+            Constraint::Length(3),
             Constraint::Min(5),
             Constraint::Length(3),
         ])
@@ -512,7 +518,7 @@ fn draw_editor(f: &mut Frame<'_>, state: &EditorState) {
     };
 
     let header = Paragraph::new(format!(
-        "{}  |  Tab/↓ move  ↑ previous  Enter advances  v toggle password",
+        "{}  |  Tab/↓ next  | ↑ previous  |  Enter -> advances  | ",
         title_text
     ))
     .block(Block::default().borders(Borders::ALL).title("editor"));
@@ -551,21 +557,32 @@ fn draw_editor(f: &mut Frame<'_>, state: &EditorState) {
         });
     f.render_widget(password, chunks[3]);
 
-    let toggle_text = if state.show_pass {
-        "toggle password: [x]"
+    let toggle_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(22),
+            Constraint::Percentage(22),
+        ])
+        .split(chunks[4]);
+
+    let toggle_label = if state.show_pass {
+        "[x] Show"
     } else {
-        "toggle password: [ ]"
+        "[ ] Show"
     };
 
-    let toggle = Paragraph::new(toggle_text)
-        .style(
-            if state.focus == Focus::TogglePassword {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            }
-        );
-    f.render_widget(toggle, chunks[4]);
+    let toggle_btn = button_block(
+        toggle_label,
+        state.focus == Focus::ShowPassword,
+    );
+
+    let generate = button_block(
+        "<  Generate  >",
+        state.focus == Focus::GenPassword,
+    );
+
+    f.render_widget(toggle_btn, toggle_row[0]);
+    f.render_widget(generate, toggle_row[1]);
 
     let notes = Paragraph::new(state.draft.notes.clone())
         .block(Block::default().borders(Borders::ALL).title("Notes"))
@@ -599,7 +616,7 @@ fn draw_editor(f: &mut Frame<'_>, state: &EditorState) {
     }
 
     let save = button_block(
-        "Save",
+        "<  Continue  >",
         state.focus == Focus::Save,
     );
 
@@ -607,11 +624,11 @@ fn draw_editor(f: &mut Frame<'_>, state: &EditorState) {
 
     let _toggle = button_block(
         toggle_label,
-        state.focus == Focus::TogglePassword,
+        state.focus == Focus::ShowPassword,
     );
 
     let cancel = button_block(
-        "Cancel",
+        "<  Cancel  >",
         state.focus == Focus::Cancel,
     );
 
@@ -663,9 +680,18 @@ pub fn tui_message(message: &str) -> Result<()> {
                 let area = centered_rect(60, 22, f.area());
                 f.render_widget(Clear, area);
 
-                let p = Paragraph::new(message)
-                    .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL).title("message"));
+                let vertical_pad = area.height.saturating_sub(3) / 2;
+                let p = Paragraph::new(format!(
+                    "{}{}",
+                    "\n".repeat(vertical_pad as usize),
+                    message
+                ))
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("message"),
+                );
 
                 f.render_widget(p, area);
             })?;
@@ -691,7 +717,7 @@ fn input_modal(prompt: &str, secret: bool) -> Result<String> {
     let res = (|| -> Result<String> {
         loop {
             term.draw(|f| {
-                let area = centered_rect(70, 20, f.area());
+                let area = centered_rect(26, 7, f.area());
                 f.render_widget(Clear, area);
 
                 let display = if secret {
