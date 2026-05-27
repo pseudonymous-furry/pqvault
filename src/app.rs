@@ -1,3 +1,30 @@
+// IMPORTANT!!!
+
+// This one is very scawwy. OwO'
+//    Upon closer inspection I was able to find
+//    an issue regarding how users authenticate
+//    when deleting a user's vault.
+
+// I was able to successfully exploit this issue
+// and delete a user's vault named "ATTACK_TEST"
+// completely bypassing authentication by replacing
+// the key bundle that the "legitimate" user used
+// with an attacker's own key, which allowed me to
+// authenticate with a different password.
+
+// FIX (TODO):
+//    Implement an "authenticate_user" function
+//    that is more ironclad and robust.
+//    e.g., checking vault sig against signing keys
+//    (after key bundle decryption)
+
+// SIDENOTE (equally scawwy):
+//    There is currently no check to see if
+//    a user already exists, so if someone
+//    makes a user with an identical name to
+//    another, they can overwrite a vault
+//    with minimal effort.
+
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 
@@ -53,7 +80,7 @@ pub fn run_app() -> Result<()> {
 }
 
 fn create_new_user(index: &mut UserIndex) -> Result<UserRecord> {
-    let username = crate::tui::tui_text_modal("New username")?;
+    let username = crate::tui::tui_text_modal("New username (41 chars max)")?;
     if username.trim().is_empty() {
         return Err(anyhow!("username cannot be empty"));
     }
@@ -62,7 +89,7 @@ fn create_new_user(index: &mut UserIndex) -> Result<UserRecord> {
     let filename = crate::tui::tui_text_modal("Key filename")?;
     let key_bundle_path = key_path_from_input(&dir, &filename);
 
-    let passphrase = crate::tui::tui_password_modal("Create passphrase")?;
+    let passphrase = crate::tui::tui_password_modal("Create passphrase (41 chars max)")?;
 
     let user_dir = create_user_dirs(&username)?;
     let keys = UserKeys::generate();

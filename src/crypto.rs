@@ -1,3 +1,35 @@
+// NOTES FOR FUTURE SELF AND/OR ANY COMPETENT DEVELOPERS READING THIS:
+// TODO: Make better serialization logic (then a migration tool).
+
+//       Stop using JSON to serialize. It's good for prototypes
+//       and fast development, but this is a vault program.
+//       Remove ASAP. Replace with proper serialization.
+//       Make a built-in migrator for pre-release files.
+
+// TODO: Make better user authentication outside of signing keys.
+
+//       NOT VERY IMPORTANT!!!
+//           (AEAD protected key bundle)
+//       This one is a little annoying in *my* trust model.
+//       It allows an attacker with knowledge of the passphrase
+//       used to encrypt a key bundle to modify encrypted key 
+//       bundle data (after decryption) and insert their own 
+//       signing key.
+
+//       In practice though, it shouldn't be too important.
+
+//       The attacker can still redefine the identity
+//       after obtaining the passphrase..
+
+// TODO: Stop using Argon2 defaults by next release.
+// TODO: Use HKDF instead of Argon2(passphrase || context) on line 162
+
+//       This one makes me nervous. It's scawwy. OwO
+
+
+// THIS IS A PRE-RELEASE STILL. DO NOT USE THIS IN PRODUCTION! -w-
+
+
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chacha20poly1305::{
@@ -126,9 +158,9 @@ fn derive_passphrase_key(
 
     let mut out = [0u8; 32];
 
-    Argon2::default()
-        .hash_password_into(&input, salt, &mut out)
-        .map_err(|_| anyhow!("argon2 derivation failed"))?;
+    // Passphrase || Context (scawwy part) OwO
+    Argon2::default().hash_password_into(&input, salt, &mut out)
+       .map_err(|_| anyhow!("argon2 derivation failed"))?;
 
     input.zeroize();
     Ok(out)
