@@ -1,3 +1,5 @@
+// THIS IS A PRE-RELEASE STILL. DO NOT USE THIS IN PRODUCTION! -w-
+
 mod app;
 mod crypto;
 mod models;

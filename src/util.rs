@@ -1,3 +1,5 @@
+// THIS IS A PRE-RELEASE STILL. DO NOT USE THIS IN PRODUCTION! -w-
+
 use anyhow::{Context, Result};
 use rand::rngs::OsRng;
 use rand::RngCore;

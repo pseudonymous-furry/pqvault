@@ -1,10 +1,5 @@
 // NOTES FOR FUTURE SELF AND/OR ANY COMPETENT DEVELOPERS READING THIS:
-// TODO: Make better serialization logic (then a migration tool).
-
-//       Stop using JSON to serialize. It's good for prototypes
-//       and fast development, but this is a vault program.
-//       Remove ASAP. Replace with proper serialization.
-//       Make a built-in migrator for pre-release files.
+// TODO: Make proper versioning and a migration tool -w-
 
 // TODO: Make better user authentication outside of signing keys.
 
@@ -19,18 +14,19 @@
 //       In practice though, it shouldn't be too important.
 
 //       The attacker can still redefine the identity
-//       after obtaining the passphrase..
+//       after obtaining the passphrase.. and thats scawwy.
 
 // TODO: Stop using Argon2 defaults by next release.
-// TODO: Use HKDF instead of Argon2(passphrase || context) on line 162
+// TODO: Use HKDF-Expand with context AFTER Argon2(passphrase)
+//       instead of Argon2(passphrase || context) in `derive_passphrase_key`
 
 //       This one makes me nervous. It's scawwy. OwO
-
 
 // THIS IS A PRE-RELEASE STILL. DO NOT USE THIS IN PRODUCTION! -w-
 
 
 use anyhow::{anyhow, Result};
+use serde::{Serialize, Deserialize};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
@@ -56,8 +52,19 @@ use zeroize::Zeroize;
 use crate::models::{KeyBundle, Vault, VaultEnvelope};
 use crate::util::{random_bytes};
 
-const KDF_CONTEXT_KEY_BUNDLE: &[u8] = b"pqvault-keybundle-v1";
-const KDF_CONTEXT_VAULT: &[u8] = b"pqvault-vault-v1";
+const KDF_CONTEXT_KEY_BUNDLE: &[u8] = b"pqvault-keybundle-v0.1";
+const KDF_CONTEXT_VAULT: &[u8] = b"pqvault-vault-v0.1";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Version {
+    pub major: u32,
+    pub minor: u32,
+}
+
+pub const KEY_VERSION: Version = Version {
+    major: 0,
+    minor: 1,
+};
 
 pub struct UserKeys {
     pub kem_private: KemDecapsulationKey,
@@ -159,12 +166,93 @@ fn derive_passphrase_key(
     let mut out = [0u8; 32];
 
     // Passphrase || Context (scawwy part) OwO
+    //   If passphrase = "abc"
+    //   and context    = "def"
+    //   then passphrase || context = "abcdef"
+    //   and if Argon2 is treated like a black-box
+    //   PRF, then passphrase can be "ab" and
+    //   context can be "cdef". Scawwy. OwO'
+
     Argon2::default().hash_password_into(&input, salt, &mut out)
        .map_err(|_| anyhow!("argon2 derivation failed"))?;
+
+    // FIX (TODO): 
+    //   Stop doing passphrase || context like an
+    //   idiot. Instead derive from passphrase for
+    //   key material and HKDF-Expand using context.
+    //      -w-
 
     input.zeroize();
     Ok(out)
 }
+
+
+#[derive(Serialize, Deserialize)]
+struct SignedVaultData<'a> {
+    version: u32,
+    username: &'a str,
+    nonce: &'a [u8],
+    wrap_nonce: &'a [u8],
+    kem_ciphertext: &'a [u8],
+    wrapped_key: &'a [u8],
+    ciphertext: &'a [u8],
+}
+
+pub fn encrypt_vault(
+    vault: &Vault,
+    keys: &UserKeys,
+    username: &str,
+) -> Result<VaultEnvelope> {
+    let vault_plain = serde_json::to_vec(vault)?;
+
+    let mut data_key = random_bytes(32);
+    let data_cipher = XChaCha20Poly1305::new_from_slice(&data_key)
+        .map_err(|_| anyhow!("bad key"))?;
+
+    let nonce = random_bytes(24);
+    let ciphertext = data_cipher.encrypt(XNonce::from_slice(&nonce), vault_plain.as_ref())?;
+
+    let (kem_ciphertext, shared) = keys.kem_public.encapsulate();
+
+    let wrap_key = derive_shared_key(&shared, KDF_CONTEXT_VAULT)?;
+    let wrap_cipher = XChaCha20Poly1305::new_from_slice(&wrap_key)
+        .map_err(|_| anyhow!("bad key"))?;
+
+    let wrap_nonce = random_bytes(24);
+    let wrapped_key = wrap_cipher.encrypt(XNonce::from_slice(&wrap_nonce), data_key.as_ref())?;
+
+    // NOTE: Building a binary blob manually is dangerous.
+    //       Mistakes here will cost you a vault.
+    //       Replaced with deterministic serialization
+    //       to keep future sanity.
+
+    let signed_struct = SignedVaultData {
+        version: KEY_VERSION,
+        username,
+        nonce: &nonce,
+        wrap_nonce: &wrap_nonce,
+        kem_ciphertext: kem_ciphertext.as_ref(),
+        wrapped_key: &wrapped_key,
+        ciphertext: &ciphertext,
+    };
+
+    let signed = serde_json::to_vec(&signed_struct)?;
+
+    let signature = keys.dsa_signing.sign(&signed);
+    data_key.zeroize();
+
+    Ok(VaultEnvelope {
+        username: username.to_string(),
+        version: KEY_VERSION,
+        kem_ciphertext_b64: STANDARD.encode(kem_ciphertext.as_ref() as &[u8]),
+        wrapped_key_b64: STANDARD.encode([wrap_nonce, wrapped_key].concat()),
+        nonce_b64: STANDARD.encode(nonce),
+        ciphertext_b64: STANDARD.encode(ciphertext),
+        signature_b64: STANDARD.encode(signature.to_bytes()),
+    })
+}
+
+/* ORIGINAL CODE TO STUDY FOR KEY MIGRATION:
 
 pub fn encrypt_vault(
     vault: &Vault,
@@ -210,9 +298,10 @@ pub fn encrypt_vault(
         signature_b64: STANDARD.encode(signature.to_bytes()),
     })
 }
+*/
 
 pub fn decrypt_vault(envelope: &VaultEnvelope, keys: &UserKeys) -> Result<Vault> {
-    if envelope.version != 1 {
+    if envelope.version != KEY_VERSION {
         return Err(anyhow!("unsupported vault version"));
     }
 
@@ -230,13 +319,17 @@ pub fn decrypt_vault(envelope: &VaultEnvelope, keys: &UserKeys) -> Result<Vault>
     let wrapped_key = wrapped_blob.get(24..)
         .ok_or_else(|| anyhow!("wrapped key missing ciphertext"))?;
 
-    let mut signed = Vec::new();
-    signed.extend_from_slice(envelope.username.as_bytes());
-    signed.extend_from_slice(&nonce);
-    signed.extend_from_slice(wrap_nonce);
-    signed.extend_from_slice(&kem_ciphertext);
-    signed.extend_from_slice(wrapped_key);
-    signed.extend_from_slice(&ciphertext);
+    let signed_struct = SignedVaultData {
+        version: 1,
+        username: &envelope.username,
+        nonce: &nonce,
+        wrap_nonce,
+        kem_ciphertext: &kem_ciphertext,
+        wrapped_key,
+        ciphertext: &ciphertext,
+    };
+
+    let signed = serde_json::to_vec(&signed_struct)?;
 
     keys.dsa_verifying.verify(&signed, &signature)?;
 

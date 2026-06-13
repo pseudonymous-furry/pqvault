@@ -25,6 +25,8 @@
 //    another, they can overwrite a vault
 //    with minimal effort.
 
+// THIS IS A PRE-RELEASE STILL. DO NOT USE THIS IN PRODUCTION! -w-
+
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 
@@ -80,6 +82,10 @@ pub fn run_app() -> Result<()> {
 }
 
 fn create_new_user(index: &mut UserIndex) -> Result<UserRecord> {
+    // TODO: Very important, very simple.
+    //       Add checks to make sure the
+    //       user being created doesn't exist.
+
     let username = crate::tui::tui_text_modal("New username (41 chars max)")?;
     if username.trim().is_empty() {
         return Err(anyhow!("username cannot be empty"));
@@ -128,6 +134,17 @@ fn delete_user_flow(index: &mut UserIndex) -> Result<()> {
 
         _ => return Err(anyhow!("must select existing user")),
     };
+
+     // TODO: VERY IMPORTANT!!!!! OwO'
+     //    The authentication currently revolves
+     //    around being able to decrypt the key bundle,
+     //    but this is unreliable and dangerous since
+     //    key bundles can be replaced. Instead,
+
+     //    I propose that the key bundle should be
+     //    capable of decrypting the VAULT with the
+     //    signature bytes being required to match
+     //    in order to delete.
 
     let passphrase =
         crate::tui::tui_password_modal("Authenticate to delete account")?;
